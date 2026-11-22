@@ -67,7 +67,11 @@ pub fn best_match(input: &str, haystacks: &[String]) -> Option<usize> {
     }
     let mut best = scores.iter().enumerate().filter(|(_, s)| **s == max);
     let first = best.next()?.0;
-    if best.next().is_some() { None } else { Some(first) }
+    if best.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
 
 /// Resolve "@3" or "@name" (prefix match) to a session index.
