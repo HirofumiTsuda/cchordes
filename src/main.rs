@@ -27,6 +27,8 @@ use session::{Session, Status};
 enum Mode {
     Normal,
     Prefix,
+    /// Scrolling back through the focused session's output.
+    Scroll,
     Sessions,
     /// Free-form input routed to a session. `target == sessions.len()` means a new one.
     Dispatch {
@@ -174,6 +176,11 @@ impl App {
                             target: self.focus,
                         };
                     }
+                    KeyCode::Char('[') => {
+                        if !self.sessions.is_empty() {
+                            self.mode = Mode::Scroll;
+                        }
+                    }
                     KeyCode::Char('q') => self.quit = true,
                     KeyCode::Char('b') => {
                         if let Some(s) = self.sessions.get_mut(self.focus) {
@@ -186,6 +193,28 @@ impl App {
                             self.focus = i;
                         }
                     }
+                    _ => {}
+                }
+            }
+            Mode::Scroll => {
+                let Some(s) = self.sessions.get_mut(self.focus) else {
+                    self.mode = Mode::Normal;
+                    return;
+                };
+                let page = (s.rows().max(2) - 1) as isize;
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        s.scroll_to_live();
+                        self.mode = Mode::Normal;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => s.scroll_by(1),
+                    KeyCode::Down | KeyCode::Char('j') => s.scroll_by(-1),
+                    KeyCode::PageUp | KeyCode::Char('u') => s.scroll_by(page),
+                    KeyCode::PageDown | KeyCode::Char('d') | KeyCode::Char(' ') => {
+                        s.scroll_by(-page)
+                    }
+                    KeyCode::Home | KeyCode::Char('g') => s.scroll_to_top(),
+                    KeyCode::End | KeyCode::Char('G') => s.scroll_to_live(),
                     _ => {}
                 }
             }
@@ -379,13 +408,20 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        let title = Line::from(vec![
+        let mut title_spans = vec![
             Span::raw(format!(" {}:{} ", i + 1, s.name)),
             Span::styled(
                 format!("[{}] ", st.label()),
                 Style::default().fg(status_color(st)),
             ),
-        ]);
+        ];
+        if s.scroll_offset() > 0 {
+            title_spans.push(Span::styled(
+                format!("[scroll -{}] ", s.scroll_offset()),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+        let title = Line::from(title_spans);
         let block = Block::bordered().border_style(border).title(title);
         let inner = block.inner(*r);
         frame.render_widget(block, *r);
@@ -397,8 +433,10 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
     let text = match (&app.mode, &app.error) {
         (_, Some(e)) => format!(" error: {e}"),
         (Mode::Prefix, _) => {
-            " c:new x:close h/l:focus v:layout i:send s:sessions H:history 1-9:jump q:quit".into()
+            " c:new x:close h/l:focus v:layout i:send s:sessions H:history [:scroll 1-9:jump q:quit"
+                .into()
         }
+        (Mode::Scroll, _) => " scroll: j/k:line u/d:page g:top G:live Esc:back to live".into(),
         _ => " Ctrl-b: command prefix".into(),
     };
     frame.render_widget(

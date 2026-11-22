@@ -34,8 +34,22 @@ All commands start with the prefix `Ctrl-b`.
 | `s` | session list |
 | `i` | send input to the right session (see below) |
 | `H` | history (type to search, Enter to open) |
+| `[` | scroll back through the focused session's output (see below) |
 | `b` | send a literal `Ctrl-b` |
 | `q` | quit |
+
+### Scrolling a pane
+
+`Ctrl-b [` enters scroll mode for the focused session (10,000 lines are kept
+per session). The pane title shows how far back you are.
+
+| Key | Action |
+| --- | --- |
+| `k` / `Up`, `j` / `Down` | one line back / forward |
+| `u` / `PageUp`, `d` / `PageDown` / `Space` | one page back / forward |
+| `g` / `Home` | oldest line |
+| `G` / `End` | back to live output |
+| `Esc` / `q` | leave scroll mode (returns to live output) |
 
 ### Routing input
 
