@@ -19,7 +19,7 @@ Running Claude Code in parallel means one terminal per session.
 A management tool that covers both the "now" and the "so far" of your agents.
 
 - **Now**: running sessions are laid out on one screen, and the state of each is visible
-- **So far**: conversation history from past sessions can be listed and viewed in one place
+- **So far**: conversation history from past sessions can be listed, viewed and resumed in one place
 
 It is a TUI that runs inside an existing terminal (the same position as tmux or zellij).
 cchordes starts and owns the sessions directly, with no dependency on tmux. It is keyboard-driven.
@@ -33,12 +33,12 @@ cchordes starts and owns the sessions directly, with no dependency on tmux. It i
 - Input routing: type free-form text and it is sent to the best-matching session (rule-based, no API); a person confirms the target each time
 - Scrollback for each pane (`Ctrl-b [`)
 - Unified, searchable history of past conversations (`~/.claude/projects`), viewable in place
+- Resume a past conversation from history in a new pane (`claude --resume <id>` in its original directory)
 
 All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, `v` toggle layout, `s` sessions, `i` route input to a session, `H` history, `[` scroll back, `1`-`9` jump, `q` quit.
 
 ### Candidates (undecided)
 
-- Resume a past session where it left off
 - Give each session its own git worktree so their work doesn't collide
 - Attach names or notes to sessions
 - Config file (launch command, key bindings, etc.)

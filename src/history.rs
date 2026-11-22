@@ -11,6 +11,10 @@ const MAX_SEARCH_BYTES: usize = 200_000;
 pub struct Entry {
     pub path: PathBuf,
     pub project: String,
+    /// Session id (the `.jsonl` file stem), as accepted by `claude --resume`.
+    pub session_id: String,
+    /// Working directory the conversation ran in, if recorded.
+    pub cwd: Option<PathBuf>,
     pub title: String,
     pub modified: SystemTime,
     /// Lowercased text used for searching.
@@ -95,10 +99,16 @@ pub fn load_all() -> Vec<Entry> {
             if messages.is_empty() {
                 continue;
             }
-            let project = raw
+            let cwd = raw
                 .split_once("\"cwd\":\"")
                 .and_then(|(_, rest)| rest.split_once('"'))
-                .map(|(cwd, _)| cwd.to_string())
+                .map(|(cwd, _)| cwd.to_string());
+            let session_id = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let project = cwd
+                .clone()
                 .unwrap_or_else(|| dir.file_name().to_string_lossy().into_owned());
             let title = messages
                 .iter()
@@ -118,6 +128,8 @@ pub fn load_all() -> Vec<Entry> {
             entries.push(Entry {
                 path,
                 project,
+                session_id,
+                cwd: cwd.map(PathBuf::from),
                 title,
                 modified,
                 haystack: haystack.to_lowercase(),

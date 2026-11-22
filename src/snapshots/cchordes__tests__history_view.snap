@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: render(&mut a)
 ---
-┌ demo project — j/k:scroll Esc:back ──────────────────────┐
+┌ demo project — j/k:scroll r:resume Esc:back ─────────────┐
 │▌ you                                                     │
 │How do I scroll a pane?                                   │
 │                                                          │
