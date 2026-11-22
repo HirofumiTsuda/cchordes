@@ -8,6 +8,9 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use anyhow::{Context, Result};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+/// Lines of scrollback kept per session.
+const SCROLLBACK_LINES: usize = 10_000;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
     Working,
@@ -34,6 +37,8 @@ pub struct Session {
     child: Box<dyn Child + Send + Sync>,
     rx: Receiver<Vec<u8>>,
     pub exited: bool,
+    /// Last status seen on the live screen (not the scrolled-back view).
+    working: bool,
     size: (u16, u16),
 }
 
@@ -87,12 +92,13 @@ impl Session {
         Ok(Self {
             name,
             cwd,
-            parser: vt100::Parser::new(nz(rows), nz(cols), 0),
+            parser: vt100::Parser::new(nz(rows), nz(cols), SCROLLBACK_LINES),
             master: pair.master,
             writer,
             child,
             rx,
             exited: false,
+            working: false,
             size: (rows, cols),
         })
     }
@@ -112,6 +118,14 @@ impl Session {
                     break;
                 }
             }
+        }
+        // While scrolled back, `contents()` shows old lines; keep the last live value.
+        if self.parser.screen().scrollback() == 0 {
+            self.working = self
+                .parser
+                .screen()
+                .contents()
+                .contains("esc to interrupt");
         }
     }
 
@@ -157,16 +171,122 @@ impl Session {
         if self.exited {
             return Status::Done;
         }
-        let text = self.parser.screen().contents();
-        if text.contains("esc to interrupt") {
+        if self.working {
             Status::Working
         } else {
             Status::Waiting
         }
     }
 
+    /// Visible rows of the pane (used as the page size when scrolling).
+    pub fn rows(&self) -> u16 {
+        self.size.0
+    }
+
+    /// How many lines the view is scrolled back from the live screen.
+    pub fn scroll_offset(&self) -> usize {
+        self.parser.screen().scrollback()
+    }
+
+    /// Scroll back (`delta > 0`) or toward the live screen (`delta < 0`).
+    pub fn scroll_by(&mut self, delta: isize) {
+        let cur = self.scroll_offset();
+        self.parser
+            .screen_mut()
+            .set_scrollback(cur.saturating_add_signed(delta));
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.parser.screen_mut().set_scrollback(usize::MAX);
+    }
+
+    pub fn scroll_to_live(&mut self) {
+        self.parser.screen_mut().set_scrollback(0);
+    }
+
     pub fn kill(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn spawn_sh(script: &str, rows: u16) -> Session {
+        Session::spawn(
+            "t".into(),
+            "sh",
+            &["-c".into(), script.into()],
+            std::env::temp_dir(),
+            rows,
+            40,
+        )
+        .unwrap()
+    }
+
+    fn pump_until(s: &mut Session, f: impl Fn(&Session) -> bool) {
+        let end = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < end {
+            s.pump();
+            if f(s) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("timed out; screen:\n{}", s.parser.screen().contents());
+    }
+
+    #[test]
+    fn scrolls_back_through_output_and_returns_to_live() {
+        let mut s = spawn_sh("seq 1 100; sleep 30", 10);
+        pump_until(&mut s, |s| s.parser.screen().contents().contains("100"));
+        assert!(s.parser.screen().contents().contains("100"));
+        assert!(!s.parser.screen().contents().contains("\n5\n"));
+
+        s.scroll_to_top();
+        assert!(s.scroll_offset() > 80);
+        let top = s.parser.screen().contents();
+        assert!(top.starts_with("1\n"), "top of scrollback was:\n{top}");
+
+        s.scroll_to_live();
+        assert_eq!(s.scroll_offset(), 0);
+        assert!(s.parser.screen().contents().contains("100"));
+        s.kill();
+    }
+
+    #[test]
+    fn scroll_by_is_clamped() {
+        let mut s = spawn_sh("seq 1 30; sleep 30", 10);
+        pump_until(&mut s, |s| s.parser.screen().contents().contains("30"));
+        s.scroll_by(-5);
+        assert_eq!(s.scroll_offset(), 0);
+        s.scroll_by(10_000);
+        assert_eq!(s.scroll_offset(), s.parser.screen().scrollback_len());
+        s.kill();
+    }
+
+    #[test]
+    fn status_ignores_scrolled_back_view() {
+        let mut s = spawn_sh("seq 1 30; printf 'esc to interrupt'; sleep 30", 10);
+        pump_until(&mut s, |s| s.status() == Status::Working);
+        s.scroll_to_top();
+        s.pump();
+        assert_eq!(s.status(), Status::Working);
+        s.kill();
+    }
+
+    #[test]
+    fn view_stays_put_when_new_output_arrives() {
+        let mut s = spawn_sh("seq 1 30; sleep 1; seq 31 60; sleep 30", 10);
+        pump_until(&mut s, |s| s.parser.screen().contents().contains("30"));
+        s.scroll_by(5);
+        let before = s.parser.screen().contents();
+        pump_until(&mut s, |s| s.parser.screen().scrollback_len() > 40);
+        assert!(s.scroll_offset() > 0);
+        assert_eq!(s.parser.screen().contents(), before);
+        s.kill();
     }
 }
