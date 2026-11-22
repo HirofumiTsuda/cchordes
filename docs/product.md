@@ -41,6 +41,7 @@ All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, 
 - Give each session its own git worktree so their work doesn't collide
 - Attach names or notes to sessions
 - Config file (launch command, key bindings, etc.)
+- A resident manager session: talk to one dedicated Claude Code session and it sends instructions to the other sessions. Leans toward orchestration, so it needs to be weighed against "Agent-to-agent coordination" in Out of scope. Input routing (rule-based) covers the simple case for now
 
 ## Out of scope
 
