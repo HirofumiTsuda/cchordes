@@ -27,6 +27,7 @@ impl Status {
 
 pub struct Session {
     pub name: String,
+    pub cwd: PathBuf,
     pub parser: vt100::Parser,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -58,7 +59,7 @@ impl Session {
         })?;
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
-        cmd.cwd(cwd);
+        cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         let child = pair
             .slave
@@ -85,6 +86,7 @@ impl Session {
 
         Ok(Self {
             name,
+            cwd,
             parser: vt100::Parser::new(nz(rows), nz(cols), 0),
             master: pair.master,
             writer,

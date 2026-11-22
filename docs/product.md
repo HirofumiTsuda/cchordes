@@ -30,9 +30,10 @@ cchordes starts and owns the sessions directly, with no dependency on tmux. It i
 
 - Run multiple sessions (`claude` by default) in split panes; key input, paste and resize pass through
 - Session list with status (working / waiting / done), detected from the screen
+- Input routing: type free-form text and it is sent to the best-matching session (rule-based, no API); a person confirms the target each time
 - Unified, searchable history of past conversations (`~/.claude/projects`), viewable in place
 
-All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, `v` toggle layout, `s` sessions, `H` history, `1`-`9` jump, `q` quit.
+All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, `v` toggle layout, `s` sessions, `i` route input to a session, `H` history, `1`-`9` jump, `q` quit.
 
 ### Candidates (undecided)
 

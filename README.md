@@ -32,9 +32,18 @@ All commands start with the prefix `Ctrl-b`.
 | `1`-`9` | jump to pane |
 | `v` | toggle side-by-side / stacked |
 | `s` | session list |
+| `i` | send input to the right session (see below) |
 | `H` | history (type to search, Enter to open) |
 | `b` | send a literal `Ctrl-b` |
 | `q` | quit |
+
+### Routing input
+
+`Ctrl-b i` opens a prompt. Type anything and cchordes guesses the target session
+from `@name` / `@N` (explicit), or from word overlap with each session's screen,
+name and working directory. The guess is shown live; `Tab` changes it (the last
+choice starts a new session with your text as its first prompt), `Enter` sends.
+No API calls are involved.
 
 Status is detected from the screen ("esc to interrupt" means working), so it
 may need adjusting if Claude Code's UI changes.

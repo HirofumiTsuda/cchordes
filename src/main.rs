@@ -4,6 +4,7 @@
 //! All commands go through a tmux-style prefix key (Ctrl-b).
 
 mod history;
+mod router;
 mod session;
 
 use std::time::Duration;
@@ -27,6 +28,11 @@ enum Mode {
     Normal,
     Prefix,
     Sessions,
+    /// Free-form input routed to a session. `target == sessions.len()` means a new one.
+    Dispatch {
+        input: String,
+        target: usize,
+    },
     HistoryList {
         entries: Vec<Entry>,
         query: String,
@@ -85,7 +91,7 @@ fn main_area(size: Rect) -> Rect {
 }
 
 impl App {
-    fn spawn(&mut self, size: Rect) {
+    fn spawn(&mut self, size: Rect, extra: Option<&str>) {
         // Size is corrected by the next layout pass; start with a guess.
         let n = self.sessions.len() + 1;
         let tile = tiles(main_area(size), n, self.vertical)
@@ -96,7 +102,9 @@ impl App {
         self.next_id += 1;
         let name = format!("{}#{}", self.program, self.next_id);
         let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
-        match Session::spawn(name, &self.program, &self.args, cwd, inner.height, inner.width) {
+        let mut args = self.args.clone();
+        args.extend(extra.map(str::to_string));
+        match Session::spawn(name, &self.program, &args, cwd, inner.height, inner.width) {
             Ok(s) => {
                 self.sessions.push(s);
                 self.focus = self.sessions.len() - 1;
@@ -140,7 +148,7 @@ impl App {
             Mode::Prefix => {
                 self.mode = Mode::Normal;
                 match key.code {
-                    KeyCode::Char('c') => self.spawn(size),
+                    KeyCode::Char('c') => self.spawn(size, None),
                     KeyCode::Char('x') => self.close_focused(),
                     KeyCode::Char('h') | KeyCode::Char('p') | KeyCode::Left | KeyCode::Up => {
                         self.move_focus(-1)
@@ -158,6 +166,12 @@ impl App {
                             entries: history::load_all(),
                             query: String::new(),
                             selected: 0,
+                        };
+                    }
+                    KeyCode::Char('i') => {
+                        self.mode = Mode::Dispatch {
+                            input: String::new(),
+                            target: self.focus,
                         };
                     }
                     KeyCode::Char('q') => self.quit = true,
@@ -181,11 +195,44 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => self.move_focus(1),
                 KeyCode::Enter => self.mode = Mode::Normal,
                 KeyCode::Char('c') => {
-                    self.spawn(size);
+                    self.spawn(size, None);
                     self.mode = Mode::Normal;
                 }
                 _ => {}
             },
+            Mode::Dispatch { input, target } => {
+                let n = self.sessions.len();
+                match key.code {
+                    KeyCode::Esc => self.mode = Mode::Normal,
+                    KeyCode::Tab => *target = (*target + 1) % (n + 1),
+                    KeyCode::Backspace => {
+                        input.pop();
+                        *target = predict(&self.sessions, input, self.focus);
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        input.push(c);
+                        *target = predict(&self.sessions, input, self.focus);
+                    }
+                    KeyCode::Enter => {
+                        let (target, input) = (*target, input.clone());
+                        let (_, body) = router::split_mention(&input);
+                        let body = body.trim().to_string();
+                        self.mode = Mode::Normal;
+                        if body.is_empty() {
+                            return;
+                        }
+                        if target >= n {
+                            self.spawn(size, Some(&body));
+                        } else {
+                            let s = &mut self.sessions[target];
+                            s.paste(&body);
+                            s.send(b"\r");
+                            self.focus = target;
+                        }
+                    }
+                    _ => {}
+                }
+            }
             Mode::HistoryList {
                 entries,
                 query,
@@ -242,6 +289,28 @@ impl App {
     }
 }
 
+/// Choose the target session for `input`: an explicit @mention, else the best
+/// text match, else the focused session.
+fn predict(sessions: &[Session], input: &str, focus: usize) -> usize {
+    let names: Vec<String> = sessions.iter().map(|s| s.name.clone()).collect();
+    let (mention, body) = router::split_mention(input);
+    if let Some(i) = mention.and_then(|m| router::resolve_mention(m, &names)) {
+        return i;
+    }
+    let hay: Vec<String> = sessions
+        .iter()
+        .map(|s| {
+            format!(
+                "{} {} {}",
+                s.name,
+                s.cwd.display(),
+                s.parser.screen().contents()
+            )
+        })
+        .collect();
+    router::best_match(body, &hay).unwrap_or(focus.min(sessions.len().saturating_sub(1)))
+}
+
 fn run(terminal: &mut DefaultTerminal, program: String, args: Vec<String>) -> Result<()> {
     let mut app = App {
         program,
@@ -256,7 +325,7 @@ fn run(terminal: &mut DefaultTerminal, program: String, args: Vec<String>) -> Re
         error: None,
     };
     let size = terminal.size()?;
-    app.spawn(Rect::new(0, 0, size.width, size.height));
+    app.spawn(Rect::new(0, 0, size.width, size.height), None);
     if app.sessions.is_empty() {
         anyhow::bail!(app.error.unwrap_or_else(|| "failed to start".into()));
     }
@@ -328,7 +397,7 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
     let text = match (&app.mode, &app.error) {
         (_, Some(e)) => format!(" error: {e}"),
         (Mode::Prefix, _) => {
-            " c:new x:close h/l:focus v:layout s:sessions H:history 1-9:jump q:quit".into()
+            " c:new x:close h/l:focus v:layout i:send s:sessions H:history 1-9:jump q:quit".into()
         }
         _ => " Ctrl-b: command prefix".into(),
     };
@@ -339,6 +408,7 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
 
     match &app.mode {
         Mode::Sessions => draw_sessions(frame, app, area),
+        Mode::Dispatch { input, target } => draw_dispatch(frame, app, area, input, *target),
         Mode::HistoryList {
             entries,
             query,
@@ -351,6 +421,25 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
         } => draw_history_view(frame, area, title, messages, *scroll),
         _ => {}
     }
+}
+
+fn draw_dispatch(frame: &mut Frame, app: &App, area: Rect, input: &str, target: usize) {
+    let h = 5.min(area.height);
+    let r = Rect::new(area.x, area.y + area.height.saturating_sub(h + 1), area.width, h);
+    frame.render_widget(Clear, r);
+    let dest = match app.sessions.get(target) {
+        Some(s) => format!("{}:{}", target + 1, s.name),
+        None => format!("new {} session", app.program),
+    };
+    let lines = vec![
+        Line::from(vec![Span::styled("> ", Style::default().fg(Color::Cyan)), Span::raw(format!("{input}_"))]),
+        Line::from(vec![
+            Span::raw("  \u{2192} "),
+            Span::styled(dest, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]),
+    ];
+    let block = Block::bordered().title(" Send to \u{2014} @name/@N:pick Tab:next Enter:send Esc:cancel ");
+    frame.render_widget(Paragraph::new(lines).block(block), r);
 }
 
 fn overlay(area: Rect) -> Rect {
