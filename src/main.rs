@@ -141,10 +141,10 @@ impl App {
             Mode::Normal => {
                 if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
                     self.mode = Mode::Prefix;
-                } else if let Some(s) = self.sessions.get_mut(self.focus) {
-                    if let Some(bytes) = encode_key(key, s.application_cursor()) {
-                        s.send(&bytes);
-                    }
+                } else if let Some(s) = self.sessions.get_mut(self.focus)
+                    && let Some(bytes) = encode_key(key, s.application_cursor())
+                {
+                    s.send(&bytes);
                 }
             }
             Mode::Prefix => {
@@ -425,11 +425,21 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
         let block = Block::bordered().border_style(border).title(title);
         let inner = block.inner(*r);
         frame.render_widget(block, *r);
-        render_screen(frame, inner, s.parser.screen(), focused && matches!(app.mode, Mode::Normal));
+        render_screen(
+            frame,
+            inner,
+            s.parser.screen(),
+            focused && matches!(app.mode, Mode::Normal),
+        );
     }
 
     // Bottom status line.
-    let bar = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+    let bar = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
     let text = match (&app.mode, &app.error) {
         (_, Some(e)) => format!(" error: {e}"),
         (Mode::Prefix, _) => {
@@ -463,20 +473,34 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
 
 fn draw_dispatch(frame: &mut Frame, app: &App, area: Rect, input: &str, target: usize) {
     let h = 5.min(area.height);
-    let r = Rect::new(area.x, area.y + area.height.saturating_sub(h + 1), area.width, h);
+    let r = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(h + 1),
+        area.width,
+        h,
+    );
     frame.render_widget(Clear, r);
     let dest = match app.sessions.get(target) {
         Some(s) => format!("{}:{}", target + 1, s.name),
         None => format!("new {} session", app.program),
     };
     let lines = vec![
-        Line::from(vec![Span::styled("> ", Style::default().fg(Color::Cyan)), Span::raw(format!("{input}_"))]),
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{input}_")),
+        ]),
         Line::from(vec![
             Span::raw("  \u{2192} "),
-            Span::styled(dest, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                dest,
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
     ];
-    let block = Block::bordered().title(" Send to \u{2014} @name/@N:pick Tab:next Enter:send Esc:cancel ");
+    let block =
+        Block::bordered().title(" Send to \u{2014} @name/@N:pick Tab:next Enter:send Esc:cancel ");
     frame.render_widget(Paragraph::new(lines).block(block), r);
 }
 
@@ -506,26 +530,35 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
             ]))
         })
         .collect();
-    let mut state = app.list_state.clone();
+    let mut state = app.list_state;
     state.select(Some(app.focus));
     let list = List::new(items)
-        .block(
-            Block::bordered()
-                .title(" Sessions — j/k:move Enter:go c:new Esc:close "),
-        )
+        .block(Block::bordered().title(" Sessions — j/k:move Enter:go c:new Esc:close "))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(list, r, &mut state);
 }
 
-fn draw_history_list(frame: &mut Frame, area: Rect, entries: &[Entry], query: &str, selected: usize) {
+fn draw_history_list(
+    frame: &mut Frame,
+    area: Rect,
+    entries: &[Entry],
+    query: &str,
+    selected: usize,
+) {
     let r = overlay(area);
     frame.render_widget(Clear, r);
-    let visible: Vec<&Entry> = entries.iter().filter(|e| history::matches(e, query)).collect();
+    let visible: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| history::matches(e, query))
+        .collect();
     let items: Vec<ListItem> = visible
         .iter()
         .map(|e| {
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:>4} ", history::age(e)), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:>4} ", history::age(e)),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(format!("{} ", e.project), Style::default().fg(Color::Cyan)),
                 Span::raw(e.title.clone()),
             ]))
@@ -545,7 +578,13 @@ fn draw_history_list(frame: &mut Frame, area: Rect, entries: &[Entry], query: &s
     frame.render_stateful_widget(list, r, &mut state);
 }
 
-fn draw_history_view(frame: &mut Frame, area: Rect, title: &str, messages: &[Message], scroll: u16) {
+fn draw_history_view(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    messages: &[Message],
+    scroll: u16,
+) {
     frame.render_widget(Clear, area);
     let mut lines: Vec<Line> = vec![];
     for m in messages {

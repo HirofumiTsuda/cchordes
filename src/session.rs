@@ -121,11 +121,7 @@ impl Session {
         }
         // While scrolled back, `contents()` shows old lines; keep the last live value.
         if self.parser.screen().scrollback() == 0 {
-            self.working = self
-                .parser
-                .screen()
-                .contents()
-                .contains("esc to interrupt");
+            self.working = self.parser.screen().contents().contains("esc to interrupt");
         }
     }
 
@@ -148,7 +144,12 @@ impl Session {
         if self.exited {
             return;
         }
-        if self.writer.write_all(bytes).and_then(|_| self.writer.flush()).is_err() {
+        if self
+            .writer
+            .write_all(bytes)
+            .and_then(|_| self.writer.flush())
+            .is_err()
+        {
             self.exited = true;
         }
     }
