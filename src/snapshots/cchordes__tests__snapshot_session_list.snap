@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: render(&mut a)
+---
+┌ 1:cat#1 [waiting] ─────────┐┌ 2:cat#2 [waiting] ─────────┐
+│                            ││                            │
+│   ┌ Sessions — j/k:move Enter:go c:new Esc:close ────┐   │
+│   │1  cat#1                waiting                   │   │
+│   │2  cat#2                waiting                   │   │
+│   │                                                  │   │
+│   │                                                  │   │
+│   │                                                  │   │
+│   │                                                  │   │
+│   │                                                  │   │
+│   │                                                  │   │
+│   └──────────────────────────────────────────────────┘   │
+└────────────────────────────┘└────────────────────────────┘
+ Ctrl-b: command prefix

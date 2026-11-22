@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: render(&mut a)
+---
+┌ 1:cat#1 [waiting] ───────────────────────────────────────┐
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+ c:new x:close h/l:focus v:layout i:send s:sessions H:histor

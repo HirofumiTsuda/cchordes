@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: render(&mut a)
+---
+┌ 1:cat#1 [waiting] ─────────┐┌ 2:cat#2 [waiting] ─────────┐
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+┌ Send to — @name/@N:pick Tab:next Enter:send Esc:cancel ──┐
+│> @2 fix the build_                                       │
+│  → 2:cat#2                                               │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+ Ctrl-b: command prefix

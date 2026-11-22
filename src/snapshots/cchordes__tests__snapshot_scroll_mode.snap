@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: render(&mut a)
+---
+┌ 1:sh#1 [waiting] [scroll -90] ───────────────────────────┐
+│1                                                         │
+│2                                                         │
+│3                                                         │
+│4                                                         │
+│5                                                         │
+│6                                                         │
+│7                                                         │
+│8                                                         │
+│9                                                         │
+│10                                                        │
+│11                                                        │
+└──────────────────────────────────────────────────────────┘
+ scroll: j/k:line u/d:page g:top G:live Esc:back to live

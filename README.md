@@ -64,6 +64,17 @@ may need adjusting if Claude Code's UI changes.
 
 See [docs/product.md](docs/product.md) for scope and plans.
 
+## Development
+
+```sh
+cargo test                      # unit, PTY and screen snapshot tests
+cargo insta review              # accept or reject changed snapshots (cargo install cargo-insta)
+INSTA_UPDATE=always cargo test  # or overwrite them all, then check `git diff src/snapshots`
+```
+
+Screen snapshots live in `src/snapshots/`. They render the TUI to a test
+backend and replay key presses, so no real terminal is needed.
+
 ## License
 
 MIT
