@@ -64,6 +64,16 @@ may need adjusting if Claude Code's UI changes.
 
 See [docs/product.md](docs/product.md) for scope and plans.
 
+## Run from a checkout
+
+`scripts/run.sh [cmd ...]` fast-forwards `main` (only if it is clean), rebuilds
+in release mode and starts cchordes in your current directory. Link it onto
+your `PATH` to start or restart from anywhere:
+
+```sh
+ln -s "$PWD/scripts/run.sh" ~/.local/bin/cchordes-run
+```
+
 ## Development
 
 ```sh
