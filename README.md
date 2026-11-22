@@ -1,5 +1,9 @@
 # cchordes
 
+[![CI](https://github.com/HirofumiTsuda/cchordes/actions/workflows/ci.yml/badge.svg)](https://github.com/HirofumiTsuda/cchordes/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/HirofumiTsuda/cchordes)](LICENSE)
+![Rust edition 2024](https://img.shields.io/badge/rust-edition%202024-orange)
+
 Manage hordes of Claude Code sessions in one terminal.
 
 cchordes is a TUI that runs multiple Claude Code sessions side by side, shows
