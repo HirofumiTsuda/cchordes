@@ -41,12 +41,12 @@ All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, 
 - Give each session its own git worktree so their work doesn't collide
 - Attach names or notes to sessions
 - Config file (launch command, key bindings, etc.)
-- A resident manager session: talk to one dedicated Claude Code session and it sends instructions to the other sessions. Leans toward orchestration, so it needs to be weighed against "Agent-to-agent coordination" in Out of scope. Input routing (rule-based) covers the simple case for now
+- **Manager agent**: one dedicated agent that talks with each session. The person talks to the manager; the manager sends instructions to the right session and reads back its state and results. Hub-and-spoke: sessions never talk to each other, and no swarm-style task breakdown. Rule-based input routing covers the simple case for now
 
 ## Out of scope
 
 - **Kanban or task management**: managing tasks is a job for another tool
-- **Agent-to-agent coordination**: no swarm-style orchestration that breaks a task down and assigns it to multiple agents. A person operates each session directly
+- **Agent-to-agent coordination**: no swarm-style orchestration where agents split up and assign work among themselves, and no direct session-to-session communication. Communication goes only between the manager (a candidate, see above) and each session; a person stays in charge of what gets done
 - **Replacing a general-purpose terminal**: the focus is on running and managing agents side by side
 - **Background execution**: sessions do not keep running after the terminal is closed (no tmux-style detach / attach). Closing stops the work; what remains is the conversation history
 
