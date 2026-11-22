@@ -33,7 +33,7 @@ All commands start with the prefix `Ctrl-b`.
 | `v` | toggle side-by-side / stacked |
 | `s` | session list |
 | `i` | send input to the right session (see below) |
-| `H` | history (type to search, Enter to open) |
+| `H` | history (type to search, Enter to open, `Ctrl-r` to resume the selected one; `r` also resumes from the opened view) |
 | `[` | scroll back through the focused session's output (see below) |
 | `b` | send a literal `Ctrl-b` |
 | `q` | quit |

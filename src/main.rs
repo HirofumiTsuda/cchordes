@@ -7,6 +7,7 @@ mod history;
 mod router;
 mod session;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -44,6 +45,8 @@ enum Mode {
         title: String,
         messages: Vec<Message>,
         scroll: u16,
+        /// Session id and working directory to resume with `r`.
+        resume: (String, Option<PathBuf>),
     },
 }
 
@@ -120,6 +123,11 @@ impl App {
     }
 
     fn spawn(&mut self, size: Rect, extra: Option<&str>) {
+        self.spawn_with(size, extra.map(str::to_string).into_iter().collect(), None);
+    }
+
+    /// Start a session with extra arguments, optionally in another directory.
+    fn spawn_with(&mut self, size: Rect, extra: Vec<String>, cwd: Option<PathBuf>) {
         // Size is corrected by the next layout pass; start with a guess.
         let n = self.sessions.len() + 1;
         let tile = tiles(main_area(size), n, self.vertical)
@@ -129,9 +137,12 @@ impl App {
         let inner = Block::bordered().inner(tile);
         self.next_id += 1;
         let name = format!("{}#{}", self.program, self.next_id);
-        let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+        let cwd = cwd
+            .filter(|d| d.is_dir())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| ".".into());
         let mut args = self.args.clone();
-        args.extend(extra.map(str::to_string));
+        args.extend(extra);
         match Session::spawn(name, &self.program, &args, cwd, inner.height, inner.width) {
             Ok(s) => {
                 self.sessions.push(s);
@@ -310,6 +321,14 @@ impl App {
                         query.push(c);
                         *selected = 0;
                     }
+                    KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if let Some(&i) = visible.get(*selected) {
+                            let e = &entries[i];
+                            let (id, cwd) = (e.session_id.clone(), e.cwd.clone());
+                            self.mode = Mode::Normal;
+                            self.spawn_with(size, vec!["--resume".into(), id], cwd);
+                        }
+                    }
                     KeyCode::Enter => {
                         if let Some(&i) = visible.get(*selected) {
                             let e = &entries[i];
@@ -319,13 +338,19 @@ impl App {
                                 title,
                                 messages,
                                 scroll: 0,
+                                resume: (e.session_id.clone(), e.cwd.clone()),
                             };
                         }
                     }
                     _ => {}
                 }
             }
-            Mode::HistoryView { scroll, .. } => match key.code {
+            Mode::HistoryView { scroll, resume, .. } => match key.code {
+                KeyCode::Char('r') => {
+                    let (id, cwd) = resume.clone();
+                    self.mode = Mode::Normal;
+                    self.spawn_with(size, vec!["--resume".into(), id], cwd);
+                }
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.mode = Mode::HistoryList {
                         entries: history::load_all(),
@@ -476,6 +501,7 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
             title,
             messages,
             scroll,
+            ..
         } => draw_history_view(frame, area, title, messages, *scroll),
         _ => {}
     }
@@ -580,7 +606,7 @@ fn draw_history_list(
     }
     let list = List::new(items)
         .block(Block::bordered().title(format!(
-            " History ({}) — search: {}_  Enter:open Esc:close ",
+            " History ({}) — search: {}_  Enter:open ^r:resume Esc:close ",
             visible.len(),
             query
         )))
@@ -615,7 +641,7 @@ fn draw_history_view(
     let para = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0))
-        .block(Block::bordered().title(format!(" {title} — j/k:scroll Esc:back ")));
+        .block(Block::bordered().title(format!(" {title} — j/k:scroll r:resume Esc:back ")));
     frame.render_widget(para, area);
 }
 
@@ -957,6 +983,20 @@ mod tests {
     }
 
     #[test]
+    fn resume_from_history_view_starts_a_session() {
+        let mut a = app("sh", &[]);
+        a.0.mode = Mode::HistoryView {
+            title: "t".into(),
+            messages: vec![],
+            scroll: 0,
+            resume: ("abc".into(), None),
+        };
+        press(&mut a, "r");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        assert_eq!(a.0.sessions.len(), 2, "error: {:?}", a.0.error);
+    }
+
+    #[test]
     fn snapshot_history_list_empty_and_view() {
         let mut a = app("cat", &[]);
         a.0.mode = Mode::HistoryList {
@@ -978,6 +1018,7 @@ mod tests {
                 },
             ],
             scroll: 0,
+            resume: ("abc".into(), None),
         };
         insta::assert_snapshot!("history_view", render(&mut a));
     }
