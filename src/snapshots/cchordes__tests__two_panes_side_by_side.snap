@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: render(&mut a)
+---
+┌ 1:sh#1 [waiting] ──────────┐┌ 2:sh#2 [waiting] ──────────┐
+│first                       ││first                       │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+│                            ││                            │
+└────────────────────────────┘└────────────────────────────┘
+ Ctrl-b: command prefix

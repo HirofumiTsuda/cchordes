@@ -290,4 +290,31 @@ mod tests {
         assert_eq!(s.parser.screen().contents(), before);
         s.kill();
     }
+
+    #[test]
+    fn resize_reaches_the_child() {
+        let mut s = spawn_sh("sleep 0.3; stty size; sleep 30", 10);
+        s.resize(7, 33);
+        pump_until(&mut s, |s| s.parser.screen().contents().contains("7 33"));
+        s.kill();
+    }
+
+    #[test]
+    fn exit_is_detected() {
+        let mut s = spawn_sh("echo bye", 10);
+        pump_until(&mut s, |s| s.exited);
+        assert_eq!(s.status(), Status::Done);
+        assert!(s.parser.screen().contents().contains("bye"));
+    }
+
+    #[test]
+    fn paste_and_send_reach_the_child() {
+        let mut s = spawn_sh("cat", 10);
+        s.paste("pasted text");
+        s.send(b"\r");
+        pump_until(&mut s, |s| {
+            s.parser.screen().contents().contains("pasted text")
+        });
+        s.kill();
+    }
 }

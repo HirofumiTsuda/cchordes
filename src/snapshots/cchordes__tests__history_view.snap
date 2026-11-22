@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: render(&mut a)
+---
+┌ demo project — j/k:scroll Esc:back ──────────────────────┐
+│▌ you                                                     │
+│How do I scroll a pane?                                   │
+│                                                          │
+│▌ claude                                                  │
+│Press Ctrl-b [ to enter scroll mode.                      │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

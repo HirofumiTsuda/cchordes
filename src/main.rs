@@ -93,6 +93,32 @@ fn main_area(size: Rect) -> Rect {
 }
 
 impl App {
+    fn new(program: String, args: Vec<String>) -> Self {
+        Self {
+            program,
+            args,
+            sessions: vec![],
+            focus: 0,
+            vertical: false,
+            next_id: 0,
+            mode: Mode::Normal,
+            list_state: ListState::default(),
+            quit: false,
+            error: None,
+        }
+    }
+
+    /// Resize and pump every session to match the current layout.
+    fn layout(&mut self, size: Rect) -> Vec<Rect> {
+        let rects = tiles(main_area(size), self.sessions.len(), self.vertical);
+        for (s, r) in self.sessions.iter_mut().zip(&rects) {
+            let inner = Block::bordered().inner(*r);
+            s.resize(inner.height, inner.width);
+            s.pump();
+        }
+        rects
+    }
+
     fn spawn(&mut self, size: Rect, extra: Option<&str>) {
         // Size is corrected by the next layout pass; start with a guess.
         let n = self.sessions.len() + 1;
@@ -341,18 +367,7 @@ fn predict(sessions: &[Session], input: &str, focus: usize) -> usize {
 }
 
 fn run(terminal: &mut DefaultTerminal, program: String, args: Vec<String>) -> Result<()> {
-    let mut app = App {
-        program,
-        args,
-        sessions: vec![],
-        focus: 0,
-        vertical: false,
-        next_id: 0,
-        mode: Mode::Normal,
-        list_state: ListState::default(),
-        quit: false,
-        error: None,
-    };
+    let mut app = App::new(program, args);
     let size = terminal.size()?;
     app.spawn(Rect::new(0, 0, size.width, size.height), None);
     if app.sessions.is_empty() {
@@ -362,12 +377,7 @@ fn run(terminal: &mut DefaultTerminal, program: String, args: Vec<String>) -> Re
     while !app.quit {
         let size_s = terminal.size()?;
         let size = Rect::new(0, 0, size_s.width, size_s.height);
-        let rects = tiles(main_area(size), app.sessions.len(), app.vertical);
-        for (s, r) in app.sessions.iter_mut().zip(&rects) {
-            let inner = Block::bordered().inner(*r);
-            s.resize(inner.height, inner.width);
-            s.pump();
-        }
+        let rects = app.layout(size);
 
         terminal.draw(|f| draw(f, &app, &rects))?;
 
@@ -711,6 +721,92 @@ fn encode_key(key: KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::time::Instant;
+
+    const W: u16 = 60;
+    const H: u16 = 14;
+
+    /// An `App` that kills its child processes when the test ends.
+    struct TestApp(App);
+
+    impl Drop for TestApp {
+        fn drop(&mut self) {
+            for s in &mut self.0.sessions {
+                s.kill();
+            }
+        }
+    }
+
+    fn screen() -> Rect {
+        Rect::new(0, 0, W, H)
+    }
+
+    fn app(program: &str, args: &[&str]) -> TestApp {
+        let mut a = App::new(program.into(), args.iter().map(|s| s.to_string()).collect());
+        a.spawn(screen(), None);
+        assert_eq!(a.sessions.len(), 1, "spawn failed: {:?}", a.error);
+        TestApp(a)
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// Replay keys: `C-b` is Ctrl-b, `Esc`, `Enter`, `Tab`, `Space`, anything else is typed char by char.
+    fn press(app: &mut TestApp, keys: &str) {
+        for tok in keys.split(' ') {
+            match tok {
+                "C-b" => app.0.handle_key(
+                    KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+                    screen(),
+                ),
+                "Esc" => app.0.handle_key(key(KeyCode::Esc), screen()),
+                "Enter" => app.0.handle_key(key(KeyCode::Enter), screen()),
+                "Tab" => app.0.handle_key(key(KeyCode::Tab), screen()),
+                "Space" => app.0.handle_key(key(KeyCode::Char(' ')), screen()),
+                text => {
+                    for c in text.chars() {
+                        app.0.handle_key(key(KeyCode::Char(c)), screen());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draw one frame to a `TestBackend` and return it as text, without trailing spaces.
+    fn render(app: &mut TestApp) -> String {
+        let rects = app.0.layout(screen());
+        let mut term = Terminal::new(TestBackend::new(W, H)).unwrap();
+        term.draw(|f| draw(f, &app.0, &rects)).unwrap();
+        let buf = term.backend().buffer();
+        (0..H)
+            .map(|y| {
+                (0..W)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn wait_for(app: &mut TestApp, needle: &str) {
+        let end = Instant::now() + Duration::from_secs(5);
+        loop {
+            let text = render(app);
+            if text.contains(needle) {
+                return;
+            }
+            assert!(
+                Instant::now() < end,
+                "timed out waiting for {needle:?}:\n{text}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn tiles_split_evenly() {
@@ -719,5 +815,170 @@ mod tests {
         assert_eq!(r[0].width + r[1].width, 100);
         let r = tiles(Rect::new(0, 0, 100, 20), 4, true);
         assert_eq!(r.iter().map(|r| r.height).sum::<u16>(), 20);
+    }
+
+    #[test]
+    fn new_session_close_and_focus_keys() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c");
+        assert_eq!((a.0.sessions.len(), a.0.focus), (2, 1));
+        press(&mut a, "C-b h");
+        assert_eq!(a.0.focus, 0);
+        press(&mut a, "C-b l");
+        assert_eq!(a.0.focus, 1);
+        press(&mut a, "C-b 1");
+        assert_eq!(a.0.focus, 0);
+        press(&mut a, "C-b 9");
+        assert_eq!(a.0.focus, 0, "jumping past the last pane is ignored");
+        press(&mut a, "C-b x");
+        assert_eq!(a.0.sessions.len(), 1);
+        assert!(!a.0.quit);
+        press(&mut a, "C-b x");
+        assert!(a.0.quit, "closing the last session quits");
+    }
+
+    #[test]
+    fn layout_and_quit_keys() {
+        let mut a = app("cat", &[]);
+        assert!(!a.0.vertical);
+        press(&mut a, "C-b v");
+        assert!(a.0.vertical);
+        press(&mut a, "C-b v");
+        assert!(!a.0.vertical);
+        press(&mut a, "C-b q");
+        assert!(a.0.quit);
+    }
+
+    #[test]
+    fn normal_keys_reach_the_session() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "hello");
+        wait_for(&mut a, "hello");
+        // `C-b b` sends a literal Ctrl-b (echoed by the tty as ^B).
+        press(&mut a, "C-b b");
+        wait_for(&mut a, "^B");
+    }
+
+    #[test]
+    fn dispatch_routes_to_the_mentioned_session() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c");
+        press(&mut a, "C-b i @1 Space routed Enter");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        assert_eq!(a.0.focus, 0, "focus follows the target");
+        wait_for(&mut a, "routed");
+    }
+
+    #[test]
+    fn dispatch_escape_cancels_and_tab_picks_new_session() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b i abc Esc");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        press(&mut a, "C-b i abc Tab Enter");
+        assert_eq!(
+            a.0.sessions.len(),
+            2,
+            "the last choice starts a new session"
+        );
+    }
+
+    #[test]
+    fn scroll_mode_enters_and_leaves() {
+        let mut a = app("sh", &["-c", "seq 1 100; sleep 30"]);
+        wait_for(&mut a, "100");
+        press(&mut a, "C-b [");
+        assert!(matches!(a.0.mode, Mode::Scroll));
+        press(&mut a, "g");
+        assert!(a.0.sessions[0].scroll_offset() > 0);
+        press(&mut a, "Esc");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        assert_eq!(a.0.sessions[0].scroll_offset(), 0);
+    }
+
+    #[test]
+    fn history_key_opens_and_closes_the_list() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b H");
+        assert!(matches!(a.0.mode, Mode::HistoryList { .. }));
+        press(&mut a, "Esc");
+        assert!(matches!(a.0.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn snapshot_single_pane() {
+        let mut a = app("sh", &["-c", "echo hello from pane; sleep 30"]);
+        wait_for(&mut a, "hello from pane");
+        insta::assert_snapshot!(render(&mut a));
+    }
+
+    #[test]
+    fn snapshot_two_panes_side_by_side_and_stacked() {
+        let mut a = app("sh", &["-c", "echo first; sleep 30"]);
+        wait_for(&mut a, "first");
+        press(&mut a, "C-b c");
+        // Both panes run the same command; wait until the new one has printed too.
+        let end = Instant::now() + Duration::from_secs(5);
+        while render(&mut a).matches("first").count() < 2 {
+            assert!(Instant::now() < end, "second pane never printed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        insta::assert_snapshot!("two_panes_side_by_side", render(&mut a));
+        press(&mut a, "C-b v");
+        insta::assert_snapshot!("two_panes_stacked", render(&mut a));
+    }
+
+    #[test]
+    fn snapshot_prefix_hint() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b");
+        insta::assert_snapshot!(render(&mut a));
+    }
+
+    #[test]
+    fn snapshot_session_list() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c C-b s");
+        insta::assert_snapshot!(render(&mut a));
+    }
+
+    #[test]
+    fn snapshot_dispatch_prompt() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c C-b i @2 Space fix Space the Space build");
+        insta::assert_snapshot!(render(&mut a));
+    }
+
+    #[test]
+    fn snapshot_scroll_mode() {
+        let mut a = app("sh", &["-c", "seq 1 100; sleep 30"]);
+        wait_for(&mut a, "100");
+        press(&mut a, "C-b [ g");
+        insta::assert_snapshot!(render(&mut a));
+    }
+
+    #[test]
+    fn snapshot_history_list_empty_and_view() {
+        let mut a = app("cat", &[]);
+        a.0.mode = Mode::HistoryList {
+            entries: vec![],
+            query: "nothing".into(),
+            selected: 0,
+        };
+        insta::assert_snapshot!("history_list_empty", render(&mut a));
+        a.0.mode = Mode::HistoryView {
+            title: "demo project".into(),
+            messages: vec![
+                Message {
+                    role: "user".into(),
+                    text: "How do I scroll a pane?".into(),
+                },
+                Message {
+                    role: "assistant".into(),
+                    text: "Press Ctrl-b [ to enter scroll mode.".into(),
+                },
+            ],
+            scroll: 0,
+        };
+        insta::assert_snapshot!("history_view", render(&mut a));
     }
 }
