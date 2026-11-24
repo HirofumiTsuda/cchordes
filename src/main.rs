@@ -77,6 +77,8 @@ struct App {
     error: Option<String>,
     /// Text left in the send prompt when it was cancelled with `Esc`.
     draft: String,
+    /// A session that is not focused finished; ring the terminal bell once.
+    bell: bool,
 }
 
 /// Byte offset of the `cursor`-th char of `s` (the end if past it).
@@ -137,6 +139,7 @@ impl App {
             quit: false,
             error: None,
             draft: String::new(),
+            bell: false,
         }
     }
 
@@ -147,6 +150,15 @@ impl App {
             let inner = Block::bordered().inner(*r);
             s.resize(inner.height, inner.width);
             s.pump();
+        }
+        for (i, s) in self.sessions.iter_mut().enumerate() {
+            let finished = s.take_just_finished();
+            if i == self.focus {
+                s.attention = false;
+            } else if finished {
+                s.attention = true;
+                self.bell = true;
+            }
         }
         rects
     }
@@ -553,6 +565,10 @@ fn run(terminal: &mut DefaultTerminal, program: String, args: Vec<String>) -> Re
         let rects = app.layout(size);
 
         terminal.draw(|f| draw(f, &app, &rects))?;
+        if std::mem::take(&mut app.bell) {
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), b"\x07");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
 
         if !event::poll(Duration::from_millis(16))? {
             continue;
@@ -593,7 +609,12 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
             Style::default().fg(Color::DarkGray)
         };
         let mut title_spans = vec![
-            Span::raw(format!(" {}:{} ", i + 1, s.name)),
+            Span::raw(format!(
+                " {}{}:{} ",
+                if s.attention { "\u{25cf} " } else { "" },
+                i + 1,
+                s.name
+            )),
             Span::styled(
                 format!("[{}] ", st.label()),
                 Style::default().fg(status_color(st)),
@@ -1229,6 +1250,32 @@ mod tests {
         }
         press(&mut a, "Enter");
         assert_eq!(a.0.sessions[1].name, "api work", "an empty name is ignored");
+    }
+
+    #[test]
+    fn unfocused_session_that_finishes_asks_for_attention() {
+        let mut a = app(
+            "sh",
+            &[
+                "-c",
+                "printf 'esc to interrupt'; sleep 1; printf '\\r\\033[2K done'; sleep 30",
+            ],
+        );
+        press(&mut a, "C-b c");
+        assert_eq!(a.0.focus, 1);
+        let end = Instant::now() + Duration::from_secs(8);
+        while !a.0.sessions[0].attention && Instant::now() < end {
+            a.0.layout(screen());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(a.0.sessions[0].attention, "pane 1 finished while unfocused");
+        assert!(a.0.bell);
+        assert!(!a.0.sessions[1].attention, "the focused pane never asks");
+        assert!(render(&mut a).contains("\u{25cf} 1:"));
+
+        press(&mut a, "C-b 1");
+        a.0.layout(screen());
+        assert!(!a.0.sessions[0].attention, "focusing clears it");
     }
 
     #[test]
