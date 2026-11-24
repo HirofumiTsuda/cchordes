@@ -21,6 +21,22 @@ pub struct Entry {
     haystack: String,
 }
 
+impl Entry {
+    /// An entry that is not backed by a file, for tests.
+    #[cfg(test)]
+    pub fn fake(project: &str, title: &str) -> Self {
+        Self {
+            path: PathBuf::new(),
+            project: project.into(),
+            session_id: "id".into(),
+            cwd: None,
+            title: title.into(),
+            modified: SystemTime::now(),
+            haystack: format!("{project} {title}").to_lowercase(),
+        }
+    }
+}
+
 pub struct Message {
     pub role: String,
     pub text: String,

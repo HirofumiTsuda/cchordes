@@ -47,6 +47,8 @@ enum Mode {
         scroll: u16,
         /// Session id and working directory to resume with `r`.
         resume: (String, Option<PathBuf>),
+        /// The list this view was opened from: entries, search text, selection.
+        back: (Vec<Entry>, String, usize),
     },
 }
 
@@ -334,28 +336,38 @@ impl App {
                             let e = &entries[i];
                             let title = format!("{} — {}", e.project, e.title);
                             let messages = history::load_messages(e);
+                            let resume = (e.session_id.clone(), e.cwd.clone());
+                            let back = (std::mem::take(entries), std::mem::take(query), *selected);
                             self.mode = Mode::HistoryView {
                                 title,
                                 messages,
                                 scroll: 0,
-                                resume: (e.session_id.clone(), e.cwd.clone()),
+                                resume,
+                                back,
                             };
                         }
                     }
                     _ => {}
                 }
             }
-            Mode::HistoryView { scroll, resume, .. } => match key.code {
+            Mode::HistoryView {
+                scroll,
+                resume,
+                back,
+                ..
+            } => match key.code {
                 KeyCode::Char('r') => {
                     let (id, cwd) = resume.clone();
                     self.mode = Mode::Normal;
                     self.spawn_with(size, vec!["--resume".into(), id], cwd);
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
+                    // Back to the same list, search and selection as before.
+                    let (entries, query, selected) = std::mem::take(back);
                     self.mode = Mode::HistoryList {
-                        entries: history::load_all(),
-                        query: String::new(),
-                        selected: 0,
+                        entries,
+                        query,
+                        selected,
                     };
                 }
                 KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
@@ -990,6 +1002,7 @@ mod tests {
             messages: vec![],
             scroll: 0,
             resume: ("abc".into(), None),
+            back: Default::default(),
         };
         press(&mut a, "r");
         assert!(matches!(a.0.mode, Mode::Normal));
@@ -1019,7 +1032,36 @@ mod tests {
             ],
             scroll: 0,
             resume: ("abc".into(), None),
+            back: Default::default(),
         };
         insta::assert_snapshot!("history_view", render(&mut a));
+    }
+
+    #[test]
+    fn leaving_a_conversation_keeps_the_search_and_selection() {
+        let mut a = app("cat", &[]);
+        a.0.mode = Mode::HistoryList {
+            entries: vec![
+                Entry::fake("alpha", "fix build"),
+                Entry::fake("beta", "fix tests"),
+                Entry::fake("gamma", "other"),
+            ],
+            query: String::new(),
+            selected: 0,
+        };
+        press(&mut a, "fix");
+        a.0.handle_key(key(KeyCode::Down), screen());
+        press(&mut a, "Enter");
+        assert!(matches!(a.0.mode, Mode::HistoryView { .. }));
+        press(&mut a, "Esc");
+        let Mode::HistoryList {
+            entries,
+            query,
+            selected,
+        } = &a.0.mode
+        else {
+            panic!("expected the history list");
+        };
+        assert_eq!((entries.len(), query.as_str(), *selected), (3, "fix", 1));
     }
 }
