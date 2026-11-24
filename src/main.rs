@@ -34,6 +34,8 @@ enum Mode {
     /// Free-form input routed to a session. `target == sessions.len()` means a new one.
     Dispatch {
         input: String,
+        /// Cursor position in `input`, counted in chars.
+        cursor: usize,
         target: usize,
     },
     HistoryList {
@@ -61,6 +63,13 @@ struct App {
     list_state: ListState,
     quit: bool,
     error: Option<String>,
+    /// Text left in the send prompt when it was cancelled with `Esc`.
+    draft: String,
+}
+
+/// Byte offset of the `cursor`-th char of `s` (the end if past it).
+fn byte_at(s: &str, cursor: usize) -> usize {
+    s.char_indices().nth(cursor).map_or(s.len(), |(i, _)| i)
 }
 
 fn main() -> Result<()> {
@@ -108,6 +117,7 @@ impl App {
             list_state: ListState::default(),
             quit: false,
             error: None,
+            draft: String::new(),
         }
     }
 
@@ -208,9 +218,16 @@ impl App {
                         };
                     }
                     KeyCode::Char('i') => {
+                        let input = self.draft.clone();
+                        let target = if input.is_empty() {
+                            self.focus
+                        } else {
+                            predict(&self.sessions, &input, self.focus)
+                        };
                         self.mode = Mode::Dispatch {
-                            input: String::new(),
-                            target: self.focus,
+                            cursor: input.chars().count(),
+                            input,
+                            target,
                         };
                     }
                     KeyCode::Char('[') => {
@@ -266,23 +283,53 @@ impl App {
                 }
                 _ => {}
             },
-            Mode::Dispatch { input, target } => {
+            Mode::Dispatch {
+                input,
+                cursor,
+                target,
+            } => {
                 let n = self.sessions.len();
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                let len = input.chars().count();
+                let mut edited = false;
                 match key.code {
-                    KeyCode::Esc => self.mode = Mode::Normal,
-                    KeyCode::Tab => *target = (*target + 1) % (n + 1),
-                    KeyCode::Backspace => {
-                        input.pop();
-                        *target = predict(&self.sessions, input, self.focus);
+                    KeyCode::Esc => {
+                        // Keep what was typed for the next time the prompt opens.
+                        self.draft = std::mem::take(input);
+                        self.mode = Mode::Normal;
+                        return;
                     }
-                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        input.push(c);
-                        *target = predict(&self.sessions, input, self.focus);
+                    KeyCode::Tab => *target = (*target + 1) % (n + 1),
+                    KeyCode::Left => *cursor = cursor.saturating_sub(1),
+                    KeyCode::Right => *cursor = (*cursor + 1).min(len),
+                    KeyCode::Home => *cursor = 0,
+                    KeyCode::End => *cursor = len,
+                    KeyCode::Char('a') if ctrl => *cursor = 0,
+                    KeyCode::Char('e') if ctrl => *cursor = len,
+                    KeyCode::Char('u') if ctrl => {
+                        input.drain(..byte_at(input, *cursor));
+                        *cursor = 0;
+                        edited = true;
+                    }
+                    KeyCode::Backspace if *cursor > 0 => {
+                        *cursor -= 1;
+                        input.remove(byte_at(input, *cursor));
+                        edited = true;
+                    }
+                    KeyCode::Delete if *cursor < len => {
+                        input.remove(byte_at(input, *cursor));
+                        edited = true;
+                    }
+                    KeyCode::Char(c) if !ctrl => {
+                        input.insert(byte_at(input, *cursor), c);
+                        *cursor += 1;
+                        edited = true;
                     }
                     KeyCode::Enter => {
                         let (target, input) = (*target, input.clone());
                         let (_, body) = router::split_mention(&input);
                         let body = body.trim().to_string();
+                        self.draft.clear();
                         self.mode = Mode::Normal;
                         if body.is_empty() {
                             return;
@@ -295,8 +342,12 @@ impl App {
                             s.send(b"\r");
                             self.focus = target;
                         }
+                        return;
                     }
                     _ => {}
+                }
+                if edited {
+                    *target = predict(&self.sessions, input, self.focus);
                 }
             }
             Mode::HistoryList {
@@ -491,7 +542,11 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
 
     match &app.mode {
         Mode::Sessions => draw_sessions(frame, app, area),
-        Mode::Dispatch { input, target } => draw_dispatch(frame, app, area, input, *target),
+        Mode::Dispatch {
+            input,
+            cursor,
+            target,
+        } => draw_dispatch(frame, app, area, input, *cursor, *target),
         Mode::HistoryList {
             entries,
             query,
@@ -507,7 +562,14 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
     }
 }
 
-fn draw_dispatch(frame: &mut Frame, app: &App, area: Rect, input: &str, target: usize) {
+fn draw_dispatch(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    input: &str,
+    cursor: usize,
+    target: usize,
+) {
     let h = 5.min(area.height);
     let r = Rect::new(
         area.x,
@@ -523,7 +585,20 @@ fn draw_dispatch(frame: &mut Frame, app: &App, area: Rect, input: &str, target: 
     let lines = vec![
         Line::from(vec![
             Span::styled("> ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("{input}_")),
+            Span::raw(input[..byte_at(input, cursor)].to_string()),
+            match input[byte_at(input, cursor)..].chars().next() {
+                Some(c) => Span::styled(
+                    c.to_string(),
+                    Style::default().add_modifier(Modifier::REVERSED),
+                ),
+                None => Span::raw("_"),
+            },
+            Span::raw(
+                input[byte_at(input, cursor)..]
+                    .chars()
+                    .skip(1)
+                    .collect::<String>(),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  \u{2192} "),
@@ -965,6 +1040,58 @@ mod tests {
         let mut a = app("cat", &[]);
         press(&mut a, "C-b c C-b s");
         insta::assert_snapshot!(render(&mut a));
+    }
+
+    #[test]
+    fn dispatch_prompt_edits_at_the_cursor_and_keeps_a_draft() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b i hello");
+        let k = |a: &mut TestApp, c| a.0.handle_key(key(c), screen());
+        k(&mut a, KeyCode::Left);
+        k(&mut a, KeyCode::Left);
+        press(&mut a, "X");
+        k(&mut a, KeyCode::Backspace);
+        k(&mut a, KeyCode::Delete);
+        press(&mut a, "Y");
+        k(&mut a, KeyCode::Home);
+        press(&mut a, ">");
+        k(&mut a, KeyCode::End);
+        press(&mut a, "!");
+        let Mode::Dispatch { input, cursor, .. } = &a.0.mode else {
+            panic!("expected the prompt");
+        };
+        assert_eq!((input.as_str(), *cursor), (">helYo!", 7));
+
+        // Editing multi-byte text must not split a char.
+        press(&mut a, "Esc");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        press(&mut a, "C-b i");
+        let Mode::Dispatch { input, cursor, .. } = &a.0.mode else {
+            panic!("expected the prompt");
+        };
+        assert_eq!(
+            (input.as_str(), *cursor),
+            (">helYo!", 7),
+            "draft is restored"
+        );
+        a.0.handle_key(
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            screen(),
+        );
+        press(&mut a, "日本語");
+        k(&mut a, KeyCode::Left);
+        k(&mut a, KeyCode::Backspace);
+        let Mode::Dispatch { input, .. } = &a.0.mode else {
+            panic!("expected the prompt");
+        };
+        assert_eq!(input, "日語");
+
+        press(&mut a, "Enter");
+        press(&mut a, "C-b i");
+        let Mode::Dispatch { input, .. } = &a.0.mode else {
+            panic!("expected the prompt");
+        };
+        assert!(input.is_empty(), "sending clears the draft");
     }
 
     #[test]

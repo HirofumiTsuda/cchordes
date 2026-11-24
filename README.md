@@ -63,6 +63,10 @@ name and working directory. The guess is shown live; `Tab` changes it (the last
 choice starts a new session with your text as its first prompt), `Enter` sends.
 No API calls are involved.
 
+Edit with `Left` / `Right`, `Home` / `End` (or `Ctrl-a` / `Ctrl-e`), `Backspace`,
+`Delete` and `Ctrl-u` (delete to the start). `Esc` cancels but keeps your text
+for the next `Ctrl-b i`; sending clears it.
+
 Status is detected from the screen ("esc to interrupt" means working), so it
 may need adjusting if Claude Code's UI changes.
 
