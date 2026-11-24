@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
@@ -69,12 +69,19 @@ fn main() -> Result<()> {
     let args: Vec<String> = argv.collect();
 
     let mut terminal = ratatui::init();
-    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableMouseCapture);
     let result = run(&mut terminal, program, args);
-    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+    let _ = execute!(
+        std::io::stdout(),
+        DisableBracketedPaste,
+        DisableMouseCapture
+    );
     ratatui::restore();
     result
 }
+
+/// Lines scrolled per mouse wheel notch.
+const WHEEL_LINES: isize = 3;
 
 /// Split `area` into `n` equal tiles, side by side or stacked.
 fn tiles(area: Rect, n: usize, vertical: bool) -> Vec<Rect> {
@@ -173,6 +180,25 @@ impl App {
         }
     }
 
+    /// Click a pane to focus it; the wheel scrolls the pane under the pointer.
+    /// Only in normal mode, so overlays and prompts are not disturbed.
+    fn handle_mouse(&mut self, m: MouseEvent, size: Rect) {
+        if !matches!(self.mode, Mode::Normal) {
+            return;
+        }
+        let pos = Position::new(m.column, m.row);
+        let rects = tiles(main_area(size), self.sessions.len(), self.vertical);
+        let Some(i) = rects.iter().position(|r| r.contains(pos)) else {
+            return;
+        };
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.focus = i,
+            MouseEventKind::ScrollUp => self.sessions[i].scroll_by(WHEEL_LINES),
+            MouseEventKind::ScrollDown => self.sessions[i].scroll_by(-WHEEL_LINES),
+            _ => {}
+        }
+    }
+
     fn handle_key(&mut self, key: KeyEvent, size: Rect) {
         match &mut self.mode {
             Mode::Normal => {
@@ -181,6 +207,8 @@ impl App {
                 } else if let Some(s) = self.sessions.get_mut(self.focus)
                     && let Some(bytes) = encode_key(key, s.application_cursor())
                 {
+                    // Typing while scrolled back would otherwise leave the view stuck in the past.
+                    s.scroll_to_live();
                     s.send(&bytes);
                 }
             }
@@ -411,6 +439,7 @@ fn run(terminal: &mut DefaultTerminal, program: String, args: Vec<String>) -> Re
         }
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => app.handle_key(key, size),
+            Event::Mouse(m) => app.handle_mouse(m, size),
             Event::Paste(text) => {
                 if let (Mode::Normal, Some(s)) = (&app.mode, app.sessions.get_mut(app.focus)) {
                     s.paste(&text);
@@ -841,6 +870,52 @@ mod tests {
         assert_eq!(r[0].width + r[1].width, 100);
         let r = tiles(Rect::new(0, 0, 100, 20), 4, true);
         assert_eq!(r.iter().map(|r| r.height).sum::<u16>(), 20);
+    }
+
+    #[test]
+    fn mouse_click_focuses_and_wheel_scrolls() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c");
+        assert_eq!(a.0.focus, 1);
+        let ev = |kind, column| MouseEvent {
+            kind,
+            column,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        a.0.handle_mouse(ev(MouseEventKind::Down(MouseButton::Left), 5), screen());
+        assert_eq!(a.0.focus, 0, "click on the left pane focuses it");
+        a.0.handle_mouse(ev(MouseEventKind::Down(MouseButton::Left), W - 5), screen());
+        assert_eq!(a.0.focus, 1);
+
+        a.0.sessions[0].send(&b"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n"[..]);
+        for _ in 0..50 {
+            a.0.layout(screen());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        a.0.handle_mouse(ev(MouseEventKind::ScrollUp, 5), screen());
+        assert_eq!(a.0.sessions[0].scroll_offset(), 3);
+        assert_eq!(a.0.sessions[1].scroll_offset(), 0, "other panes stay put");
+        a.0.handle_mouse(ev(MouseEventKind::ScrollDown, 5), screen());
+        assert_eq!(a.0.sessions[0].scroll_offset(), 0);
+
+        a.0.mode = Mode::Prefix;
+        a.0.handle_mouse(ev(MouseEventKind::Down(MouseButton::Left), 5), screen());
+        assert_eq!(a.0.focus, 1, "ignored outside normal mode");
+    }
+
+    #[test]
+    fn typing_returns_a_scrolled_pane_to_live() {
+        let mut a = app("cat", &[]);
+        a.0.sessions[0].send(&b"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n"[..]);
+        for _ in 0..50 {
+            a.0.layout(screen());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        a.0.sessions[0].scroll_by(5);
+        assert!(a.0.sessions[0].scroll_offset() > 0);
+        press(&mut a, "x");
+        assert_eq!(a.0.sessions[0].scroll_offset(), 0);
     }
 
     #[test]
