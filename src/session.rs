@@ -39,6 +39,10 @@ pub struct Session {
     pub exited: bool,
     /// Last status seen on the live screen (not the scrolled-back view).
     working: bool,
+    /// Set when the session stopped working or exited; the app takes it once.
+    just_finished: bool,
+    /// Finished while it was not focused and nobody has looked at it yet.
+    pub attention: bool,
     size: (u16, u16),
 }
 
@@ -99,6 +103,8 @@ impl Session {
             rx,
             exited: false,
             working: false,
+            just_finished: false,
+            attention: false,
             size: (rows, cols),
         })
     }
@@ -115,14 +121,22 @@ impl Session {
                 Err(TryRecvError::Disconnected) => {
                     let _ = self.child.wait();
                     self.exited = true;
+                    self.just_finished = true;
                     break;
                 }
             }
         }
         // While scrolled back, `contents()` shows old lines; keep the last live value.
         if self.parser.screen().scrollback() == 0 {
-            self.working = self.parser.screen().contents().contains("esc to interrupt");
+            let now = self.parser.screen().contents().contains("esc to interrupt");
+            self.just_finished |= self.working && !now;
+            self.working = now;
         }
+    }
+
+    /// True once after the session stopped working or exited.
+    pub fn take_just_finished(&mut self) -> bool {
+        std::mem::take(&mut self.just_finished)
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {

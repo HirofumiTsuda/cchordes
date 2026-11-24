@@ -74,6 +74,9 @@ Edit with `Left` / `Right`, `Home` / `End` (or `Ctrl-a` / `Ctrl-e`), `Backspace`
 `Delete` and `Ctrl-u` (delete to the start). `Esc` cancels but keeps your text
 for the next `Ctrl-b i`; sending clears it.
 
+When a session that is not focused stops working (or exits), its pane title
+gets a `●` and the terminal bell rings once. Focusing the pane clears the mark.
+
 Status is detected from the screen ("esc to interrupt" means working), so it
 may need adjusting if Claude Code's UI changes.
 
