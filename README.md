@@ -34,6 +34,7 @@ All commands start with the prefix `Ctrl-b`.
 | `x` | close focused session (asks first unless it has finished) |
 | `h` / `l` | move focus |
 | `1`-`9` | jump to pane |
+| `,` | rename focused session (`@name` routing uses the new name) |
 | `v` | toggle side-by-side / stacked |
 | `s` | session list |
 | `i` | send input to the right session (see below) |
