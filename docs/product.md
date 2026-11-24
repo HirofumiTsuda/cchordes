@@ -31,16 +31,18 @@ cchordes starts and owns the sessions directly, with no dependency on tmux. It i
 - Run multiple sessions (`claude` by default) in split panes; key input, paste and resize pass through
 - Session list with status (working / waiting / done), detected from the screen
 - Input routing: type free-form text and it is sent to the best-matching session (rule-based, no API); a person confirms the target each time
-- Scrollback for each pane (`Ctrl-b [`)
+- Scrollback for each pane (`Ctrl-b [`), and mouse support: click to focus, wheel to scroll
+- Rename a session (`Ctrl-b ,`); a dot and the terminal bell mark an unfocused session that finished
+- Confirmation before closing or quitting while a session is running
 - Unified, searchable history of past conversations (`~/.claude/projects`), viewable in place
 - Resume a past conversation from history in a new pane (`claude --resume <id>` in its original directory)
 
-All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, `v` toggle layout, `s` sessions, `i` route input to a session, `H` history, `[` scroll back, `1`-`9` jump, `q` quit.
+All commands go through the `Ctrl-b` prefix: `c` new, `x` close, `h`/`l` focus, `v` toggle layout, `s` sessions, `i` route input to a session, `H` history, `[` scroll back, `,` rename, `1`-`9` jump, `q` quit.
 
 ### Candidates (undecided)
 
 - Give each session its own git worktree so their work doesn't collide
-- Attach names or notes to sessions
+- Notes on sessions, and keeping names across runs (renaming itself works today)
 - Config file (launch command, key bindings, etc.)
 - **Manager agent**: one dedicated agent that talks with each session. The person talks to the manager; the manager sends instructions to the right session and reads back its state and results. Hub-and-spoke: sessions never talk to each other, and no swarm-style task breakdown. Rule-based input routing covers the simple case for now
 
