@@ -25,9 +25,17 @@ use ratatui::{DefaultTerminal, Frame};
 use history::{Entry, Message};
 use session::{Session, Status};
 
+/// A destructive command waiting for `y`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Confirm {
+    Close,
+    Quit,
+}
+
 enum Mode {
     Normal,
     Prefix,
+    Confirm(Confirm),
     /// Scrolling back through the focused session's output.
     Scroll,
     Sessions,
@@ -216,7 +224,14 @@ impl App {
                 self.mode = Mode::Normal;
                 match key.code {
                     KeyCode::Char('c') => self.spawn(size, None),
-                    KeyCode::Char('x') => self.close_focused(),
+                    KeyCode::Char('x') => {
+                        // A finished session has nothing left to lose.
+                        match self.sessions.get(self.focus).map(Session::status) {
+                            Some(Status::Done) => self.close_focused(),
+                            Some(_) => self.mode = Mode::Confirm(Confirm::Close),
+                            None => {}
+                        }
+                    }
                     KeyCode::Char('h') | KeyCode::Char('p') | KeyCode::Left | KeyCode::Up => {
                         self.move_focus(-1)
                     }
@@ -246,7 +261,13 @@ impl App {
                             self.mode = Mode::Scroll;
                         }
                     }
-                    KeyCode::Char('q') => self.quit = true,
+                    KeyCode::Char('q') => {
+                        if self.sessions.iter().all(|s| s.status() == Status::Done) {
+                            self.quit = true;
+                        } else {
+                            self.mode = Mode::Confirm(Confirm::Quit);
+                        }
+                    }
                     KeyCode::Char('b') => {
                         if let Some(s) = self.sessions.get_mut(self.focus) {
                             s.send(&[0x02]);
@@ -259,6 +280,16 @@ impl App {
                         }
                     }
                     _ => {}
+                }
+            }
+            Mode::Confirm(what) => {
+                let what = *what;
+                self.mode = Mode::Normal;
+                if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+                    match what {
+                        Confirm::Close => self.close_focused(),
+                        Confirm::Quit => self.quit = true,
+                    }
                 }
             }
             Mode::Scroll => {
@@ -509,6 +540,13 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
         (Mode::Prefix, _) => {
             " c:new x:close h/l:focus v:layout i:send s:sessions H:history [:scroll 1-9:jump q:quit"
                 .into()
+        }
+        (Mode::Confirm(Confirm::Close), _) => {
+            let name = app.sessions.get(app.focus).map_or("", |s| s.name.as_str());
+            format!(" Close {name}? It is still running. y:close any other key:cancel")
+        }
+        (Mode::Confirm(Confirm::Quit), _) => {
+            " Quit and end all sessions? y:quit any other key:cancel".into()
         }
         (Mode::Scroll, _) => " scroll: j/k:line u/d:page g:top G:live Esc:back to live".into(),
         _ => " Ctrl-b: command prefix".into(),
@@ -919,6 +957,33 @@ mod tests {
     }
 
     #[test]
+    fn close_and_quit_ask_first_unless_the_session_is_done() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c");
+        press(&mut a, "C-b x");
+        assert!(matches!(a.0.mode, Mode::Confirm(Confirm::Close)));
+        assert!(render(&mut a).contains("Close"));
+        press(&mut a, "n");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        assert_eq!(a.0.sessions.len(), 2, "any other key cancels");
+
+        press(&mut a, "C-b q");
+        assert!(matches!(a.0.mode, Mode::Confirm(Confirm::Quit)));
+        press(&mut a, "Esc");
+        assert!(!a.0.quit);
+
+        // A finished session is closed without asking.
+        a.0.sessions[1].exited = true;
+        press(&mut a, "C-b x");
+        assert!(matches!(a.0.mode, Mode::Normal));
+        assert_eq!(a.0.sessions.len(), 1);
+
+        a.0.sessions[0].exited = true;
+        press(&mut a, "C-b q");
+        assert!(a.0.quit, "quitting with nothing running does not ask");
+    }
+
+    #[test]
     fn new_session_close_and_focus_keys() {
         let mut a = app("cat", &[]);
         press(&mut a, "C-b c");
@@ -931,10 +996,10 @@ mod tests {
         assert_eq!(a.0.focus, 0);
         press(&mut a, "C-b 9");
         assert_eq!(a.0.focus, 0, "jumping past the last pane is ignored");
-        press(&mut a, "C-b x");
+        press(&mut a, "C-b x y");
         assert_eq!(a.0.sessions.len(), 1);
         assert!(!a.0.quit);
-        press(&mut a, "C-b x");
+        press(&mut a, "C-b x y");
         assert!(a.0.quit, "closing the last session quits");
     }
 
@@ -946,7 +1011,7 @@ mod tests {
         assert!(a.0.vertical);
         press(&mut a, "C-b v");
         assert!(!a.0.vertical);
-        press(&mut a, "C-b q");
+        press(&mut a, "C-b q y");
         assert!(a.0.quit);
     }
 
