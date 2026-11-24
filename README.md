@@ -31,7 +31,7 @@ All commands start with the prefix `Ctrl-b`.
 | Key | Action |
 | --- | --- |
 | `c` | new session |
-| `x` | close focused session |
+| `x` | close focused session (asks first unless it has finished) |
 | `h` / `l` | move focus |
 | `1`-`9` | jump to pane |
 | `v` | toggle side-by-side / stacked |
@@ -40,7 +40,7 @@ All commands start with the prefix `Ctrl-b`.
 | `H` | history (type to search, Enter to open, `Ctrl-r` to resume the selected one; `r` also resumes from the opened view) |
 | `[` | scroll back through the focused session's output (see below) |
 | `b` | send a literal `Ctrl-b` |
-| `q` | quit |
+| `q` | quit (asks first unless every session has finished) |
 
 ### Mouse
 
