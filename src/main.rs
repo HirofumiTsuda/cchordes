@@ -39,6 +39,8 @@ enum Mode {
     /// Scrolling back through the focused session's output.
     Scroll,
     Sessions,
+    /// Typing a new name for the focused session.
+    Rename(String),
     /// Free-form input routed to a session. `target == sessions.len()` means a new one.
     Dispatch {
         input: String,
@@ -280,6 +282,11 @@ impl App {
                             self.mode = Mode::Scroll;
                         }
                     }
+                    KeyCode::Char(',') => {
+                        if let Some(s) = self.sessions.get(self.focus) {
+                            self.mode = Mode::Rename(s.name.clone());
+                        }
+                    }
                     KeyCode::Char('q') => {
                         if self.sessions.iter().all(|s| s.status() == Status::Done) {
                             self.quit = true;
@@ -333,6 +340,25 @@ impl App {
                     _ => {}
                 }
             }
+            Mode::Rename(input) => match key.code {
+                KeyCode::Esc => self.mode = Mode::Normal,
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    input.push(c);
+                }
+                KeyCode::Enter => {
+                    let name = input.trim().to_string();
+                    if !name.is_empty()
+                        && let Some(s) = self.sessions.get_mut(self.focus)
+                    {
+                        s.name = name;
+                    }
+                    self.mode = Mode::Normal;
+                }
+                _ => {}
+            },
             Mode::Sessions => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
                 KeyCode::Up | KeyCode::Char('k') => self.move_focus(-1),
@@ -601,7 +627,7 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
     let text = match (&app.mode, &app.error) {
         (_, Some(e)) => format!(" error: {e}"),
         (Mode::Prefix, _) => {
-            " c:new x:close h/l:focus v:layout i:send s:sessions H:history [:scroll 1-9:jump q:quit"
+            " c:new x:close h/l:focus v:layout i:send s:sessions H:history [:scroll 1-9:jump q:quit ,:rename"
                 .into()
         }
         (Mode::Confirm(Confirm::Close), _) => {
@@ -611,6 +637,7 @@ fn draw(frame: &mut Frame, app: &App, rects: &[Rect]) {
         (Mode::Confirm(Confirm::Quit), _) => {
             " Quit and end all sessions? y:quit any other key:cancel".into()
         }
+        (Mode::Rename(input), _) => format!(" rename: {input}_  Enter:ok Esc:cancel"),
         (Mode::Scroll, _) => " scroll: j/k:line u/d:page g:top G:live Esc:back to live".into(),
         _ => " Ctrl-b: command prefix".into(),
     };
@@ -1178,6 +1205,30 @@ mod tests {
         insta::assert_snapshot!("two_panes_side_by_side", render(&mut a));
         press(&mut a, "C-b v");
         insta::assert_snapshot!("two_panes_stacked", render(&mut a));
+    }
+
+    #[test]
+    fn rename_changes_the_focused_session_name() {
+        let mut a = app("cat", &[]);
+        press(&mut a, "C-b c C-b ,");
+        assert!(render(&mut a).contains("rename: cat#2_"));
+        for _ in 0..5 {
+            a.0.handle_key(key(KeyCode::Backspace), screen());
+        }
+        press(&mut a, "api Space work");
+        press(&mut a, "Enter");
+        assert_eq!(a.0.sessions[1].name, "api work");
+        assert_eq!(a.0.sessions[0].name, "cat#1");
+        assert!(render(&mut a).contains("2:api work"));
+
+        press(&mut a, "C-b , Esc");
+        assert_eq!(a.0.sessions[1].name, "api work", "Esc keeps the name");
+        press(&mut a, "C-b ,");
+        for _ in 0..20 {
+            a.0.handle_key(key(KeyCode::Backspace), screen());
+        }
+        press(&mut a, "Enter");
+        assert_eq!(a.0.sessions[1].name, "api work", "an empty name is ignored");
     }
 
     #[test]
