@@ -42,6 +42,12 @@ All commands start with the prefix `Ctrl-b`.
 | `b` | send a literal `Ctrl-b` |
 | `q` | quit |
 
+### Mouse
+
+Click a pane to focus it. The wheel scrolls the pane under the pointer; typing
+returns it to live output. Because cchordes captures the mouse, select text
+with `Shift`+drag (your terminal's own selection).
+
 ### Scrolling a pane
 
 `Ctrl-b [` enters scroll mode for the focused session (10,000 lines are kept
